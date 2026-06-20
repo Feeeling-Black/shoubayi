@@ -8,3 +8,6 @@ ShouBaYiCocos/temp
 preview-server*.log
 *.png
 !ShouBaYiCocos/assets/resources/ui/Hand/*.png
+!ShouBaYiCocos/assets/resources/ui/*.png
+!ShouBaYiCocos/assets/resources/*.png
+!ShouBaYiCocos/assets/Texture/*.png
