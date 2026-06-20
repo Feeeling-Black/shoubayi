@@ -212,7 +212,7 @@ function pageHtml(): string {
       position: relative;
       width: 100vw;
       height: 100vh;
-      min-height: 520px;
+      height: 100dvh;
       overflow: hidden;
       background: #123b2a url('/ui/table-bg-v1.png') center / cover no-repeat;
     }
@@ -438,6 +438,15 @@ function pageHtml(): string {
       align-items: center;
     }
     .action-bar .btn { width: 132px; }
+    .stage.lobby .action-bar,
+    .stage.lobby .hand-status,
+    .stage.lobby .hand,
+    .stage.lobby .log {
+      display: none;
+    }
+    .stage.lobby .center {
+      top: min(58%, 360px);
+    }
     .hand-status {
       position: absolute;
       z-index: 18;
@@ -585,13 +594,37 @@ function pageHtml(): string {
       .hand-status { width: calc(100vw - 24px); bottom: 78px; }
       .card { width: 48px; height: 67px; margin-left: -19px; }
     }
+    @media (orientation: landscape) and (max-height: 520px) {
+      .topbar { top: 8px; height: 34px; font-size: 15px; border-radius: 16px; }
+      .join-box { top: 56px; width: min(410px, calc(100vw - 24px)); padding: 8px; }
+      .join-box input { height: 30px; font-size: 14px; }
+      .join-box .btn { height: 30px; font-size: 15px; }
+      .center { top: 50%; }
+      .center-line { font-size: 22px; }
+      .center-tip { font-size: 13px; }
+      .seat { transform: scale(.68); }
+      .seat.a { left: -38px; bottom: 36px; }
+      .seat.b { right: -52px; top: 176px; }
+      .seat.c { top: 82px; transform: translateX(-50%) scale(.68); }
+      .seat.d { left: -52px; top: 176px; }
+      .action-bar { bottom: 88px; gap: 12px; }
+      .action-bar .btn { width: 92px; height: 32px; font-size: 15px; }
+      .hand-status { bottom: 54px; height: 24px; font-size: 12px; }
+      .hand { bottom: 2px; height: 58px; }
+      .card { width: 38px; height: 53px; margin-left: -15px; }
+      .play-zone.a { bottom: 130px; }
+      .play-zone.b { right: 132px; top: 232px; }
+      .play-zone.c { top: 148px; }
+      .play-zone.d { left: 132px; top: 232px; }
+      .mini-card { width: 36px; height: 50px; margin-left: -11px; }
+    }
     @media (orientation: portrait) and (max-width: 920px) {
       .rotate-mask { display: flex; }
     }
   </style>
 </head>
 <body>
-  <main class="stage">
+  <main id="stage" class="stage lobby">
     <section class="topbar">
       <span id="roomLabel">房号 --</span>
       <span id="roundLabel">第 1 局</span>
@@ -710,6 +743,20 @@ function pageHtml(): string {
       if (nickname) localStorage.setItem('nickname', nickname);
     }
 
+    function clearRoomMemory() {
+      state.roomCode = '';
+      state.playerId = '';
+      state.selected.clear();
+      localStorage.removeItem('roomCode');
+      localStorage.removeItem('playerId');
+      $('roomCode').value = '';
+      $('roomLabel').textContent = '房号 --';
+      $('turnLabel').textContent = '等待';
+      $('centerText').textContent = '等待开局';
+      $('centerTip').textContent = '4 人到齐后开始';
+      $('stage').className = 'stage lobby';
+    }
+
     function seatView(data, seatId) {
       return data.players.find((item) => item.seat === seatId) || { seat: seatId, nickname: '', occupied: false };
     }
@@ -754,6 +801,7 @@ function pageHtml(): string {
 
     function render(data) {
       state.lastSnapshot = data;
+      $('stage').className = 'stage ' + (data.started ? 'playing' : 'lobby');
       const level = data.context?.levelRank || '3';
       const room = data.code || '--';
       $('roomLabel').textContent = '房号 ' + room;
@@ -797,6 +845,11 @@ function pageHtml(): string {
         const data = await api('/api/rooms/' + state.roomCode + '/snapshot?playerId=' + encodeURIComponent(state.playerId));
         render(data);
       } catch (error) {
+        if (error.message === 'ROOM_NOT_FOUND') {
+          clearRoomMemory();
+          toast('房间已失效，请重新创建或加入');
+          return;
+        }
         toast(error.message);
       }
     }
@@ -823,6 +876,11 @@ function pageHtml(): string {
         toast('已加入房间');
         await refresh();
       } catch (error) {
+        if (error.message === 'ROOM_NOT_FOUND') {
+          clearRoomMemory();
+          toast('房间不存在，请确认房号');
+          return;
+        }
         toast(error.message);
       }
     };
