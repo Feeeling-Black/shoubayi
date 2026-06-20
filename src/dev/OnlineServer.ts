@@ -530,6 +530,30 @@ function pageHtml(): string {
       border: 1px solid rgba(255,220,120,.75);
       display: none;
     }
+    .rotate-mask {
+      position: fixed;
+      z-index: 120;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 28px;
+      text-align: center;
+      color: #fff4bd;
+      background: radial-gradient(circle at center, rgba(10, 72, 52, .96), rgba(3, 18, 21, .98));
+      text-shadow: 0 2px 4px rgba(0,0,0,.55);
+    }
+    .rotate-card {
+      max-width: 320px;
+      padding: 22px 18px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 220, 120, .6);
+      background: rgba(0, 0, 0, .28);
+      box-shadow: 0 10px 28px rgba(0,0,0,.35);
+    }
+    .rotate-icon { font-size: 46px; line-height: 1; margin-bottom: 10px; }
+    .rotate-title { font-size: 22px; font-weight: 900; margin-bottom: 8px; }
+    .rotate-text { font-size: 15px; color: #e9f2df; line-height: 1.45; }
     .log {
       position: absolute;
       z-index: 16;
@@ -560,6 +584,9 @@ function pageHtml(): string {
       .action-bar .btn { width: 96px; font-size: 16px; }
       .hand-status { width: calc(100vw - 24px); bottom: 78px; }
       .card { width: 48px; height: 67px; margin-left: -19px; }
+    }
+    @media (orientation: portrait) and (max-width: 920px) {
+      .rotate-mask { display: flex; }
     }
   </style>
 </head>
@@ -610,6 +637,13 @@ function pageHtml(): string {
     <section id="hand" class="hand"></section>
     <section id="log" class="log"></section>
     <div id="toast" class="toast"></div>
+    <section id="rotateMask" class="rotate-mask">
+      <div class="rotate-card">
+        <div class="rotate-icon">↻</div>
+        <div class="rotate-title">请横屏游玩</div>
+        <div class="rotate-text">把手机横过来，画面会自动恢复。部分浏览器需要先点一下页面才允许横屏。</div>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -624,6 +658,19 @@ function pageHtml(): string {
     const $ = (id) => document.getElementById(id);
     $('roomCode').value = state.roomCode;
     $('nickname').value = localStorage.getItem('nickname') || '';
+
+    async function requestLandscape() {
+      try {
+        if (document.fullscreenEnabled && !document.fullscreenElement) {
+          await document.documentElement.requestFullscreen();
+        }
+        if (screen.orientation?.lock) {
+          await screen.orientation.lock('landscape');
+        }
+      } catch (_) {
+        // Some mobile browsers only allow manual rotation. The portrait mask handles that case.
+      }
+    }
 
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -756,6 +803,7 @@ function pageHtml(): string {
 
     $('create').onclick = async () => {
       try {
+        await requestLandscape();
         const nickname = $('nickname').value.trim() || '玩家';
         const data = await api('/api/rooms', { nickname });
         remember(data);
@@ -767,6 +815,7 @@ function pageHtml(): string {
     };
     $('join').onclick = async () => {
       try {
+        await requestLandscape();
         const nickname = $('nickname').value.trim() || '玩家';
         const code = $('roomCode').value.trim();
         const data = await api('/api/rooms/' + code + '/join', { nickname, playerId: state.playerId });
@@ -779,6 +828,7 @@ function pageHtml(): string {
     };
     $('start').onclick = async () => {
       try {
+        await requestLandscape();
         await api('/api/rooms/' + state.roomCode + '/start', { playerId: state.playerId });
         await refresh();
       } catch (error) {
@@ -787,6 +837,7 @@ function pageHtml(): string {
     };
     $('play').onclick = async () => {
       try {
+        await requestLandscape();
         await api('/api/rooms/' + state.roomCode + '/play', { playerId: state.playerId, cardIds: Array.from(state.selected) });
         state.selected.clear();
         await refresh();
@@ -796,6 +847,7 @@ function pageHtml(): string {
     };
     $('pass').onclick = async () => {
       try {
+        await requestLandscape();
         await api('/api/rooms/' + state.roomCode + '/pass', { playerId: state.playerId });
         state.selected.clear();
         await refresh();
@@ -822,6 +874,7 @@ function pageHtml(): string {
         $('play').disabled = !state.lastSnapshot.started || state.lastSnapshot.currentSeat !== state.lastSnapshot.yourSeat || state.selected.size === 0;
       }
     };
+    document.addEventListener('click', requestLandscape, { once: true });
 
     setInterval(refresh, 900);
     refresh();
