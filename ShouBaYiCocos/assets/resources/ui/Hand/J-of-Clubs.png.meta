@@ -1,0 +1,38 @@
+{
+  "ver": "2.3.7",
+  "uuid": "9495d558-28ea-4af6-9165-f9176e77b7f0",
+  "importer": "texture",
+  "type": "sprite",
+  "wrapMode": "clamp",
+  "filterMode": "bilinear",
+  "premultiplyAlpha": false,
+  "genMipmaps": false,
+  "packable": true,
+  "width": 100,
+  "height": 140,
+  "platformSettings": {},
+  "subMetas": {
+    "J-of-Clubs": {
+      "ver": "1.0.6",
+      "uuid": "b92cd569-0a08-43a8-b4db-a27ce06b2b63",
+      "importer": "sprite-frame",
+      "rawTextureUuid": "9495d558-28ea-4af6-9165-f9176e77b7f0",
+      "trimType": "auto",
+      "trimThreshold": 1,
+      "rotated": false,
+      "offsetX": 0.5,
+      "offsetY": -0.5,
+      "trimX": 3,
+      "trimY": 1,
+      "width": 95,
+      "height": 139,
+      "rawWidth": 100,
+      "rawHeight": 140,
+      "borderTop": 0,
+      "borderBottom": 0,
+      "borderLeft": 0,
+      "borderRight": 0,
+      "subMetas": {}
+    }
+  }
+}

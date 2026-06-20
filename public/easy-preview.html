@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>手把一 简单预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Microsoft YaHei", Arial, sans-serif; background: #0d3a2c; color: #fff8df; }
+    header { padding: 18px; background: #08261e; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    button { border: 0; border-radius: 8px; padding: 11px 14px; font-size: 15px; background: #f0c04c; color: #171717; cursor: pointer; }
+    button.secondary { background: #e7efe9; }
+    button.danger { background: #f29b78; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 18px; display: grid; gap: 14px; }
+    .hero { background: #fff8df; color: #10352a; border-radius: 10px; padding: 18px; display: grid; gap: 8px; }
+    .hero .big { font-size: 28px; font-weight: 800; }
+    .hint { color: #d9e8df; line-height: 1.7; font-size: 14px; }
+    .hero .hint { color: #345247; }
+    .table { min-height: 260px; background: #14513d; border: 1px solid #2b765d; border-radius: 10px; padding: 16px; display: grid; grid-template-columns: 1fr 1.3fr 1fr; grid-template-rows: auto auto auto; gap: 12px; align-items: center; }
+    .player { background: #0b3025; border-radius: 10px; padding: 14px; text-align: center; border: 2px solid transparent; }
+    .player.active { border-color: #f0c04c; box-shadow: 0 0 0 3px rgba(240,192,76,.18); }
+    .player .name { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+    .top { grid-column: 2; grid-row: 1; }
+    .left { grid-column: 1; grid-row: 2; }
+    .center { grid-column: 2; grid-row: 2; background: #0f3d30; min-height: 150px; border-radius: 12px; display: grid; place-items: center; text-align: center; padding: 18px; line-height: 1.8; }
+    .right { grid-column: 3; grid-row: 2; }
+    .me { grid-column: 2; grid-row: 3; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .hand { background: #14513d; border: 1px solid #2b765d; border-radius: 10px; padding: 14px; display: flex; flex-wrap: wrap; gap: 8px; min-height: 160px; align-content: flex-start; }
+    .card { width: 58px; height: 80px; border-radius: 8px; background: #fffbed; color: #161616; display: grid; place-items: center; font-weight: 800; border: 2px solid transparent; cursor: pointer; user-select: none; box-shadow: 0 6px 12px rgba(0,0,0,.22); }
+    .card.selected { border-color: #f0c04c; transform: translateY(-8px); }
+    .card.level { background: #fff1a8; color: #5b3500; }
+    .card.laizi { background: #e9fbff; color: #034a5d; }
+    .log { background: #0b3025; border-radius: 10px; padding: 12px; color: #ffe89a; line-height: 1.7; max-height: 170px; overflow: auto; font-size: 14px; }
+    @media (max-width: 760px) {
+      .table { grid-template-columns: 1fr; grid-template-rows: auto; }
+      .top, .left, .center, .right, .me { grid-column: 1; grid-row: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>手把一 简单预览：你只控制 A</strong>
+    <button id="newGame">重新开始</button>
+  </header>
+  <div class="wrap">
+    <section class="hero">
+      <div id="mainText" class="big"></div>
+      <div id="subText"></div>
+      <div class="hint">版本：后端规则对齐版。当前打 3，带 ★ 的 3 是级牌；LZ 不能单出，但可以补同张和已有点数的连牌。</div>
+    </section>
+
+    <section class="table">
+      <div id="pC" class="player top"></div>
+      <div id="pD" class="player left"></div>
+      <div class="center" id="center"></div>
+      <div id="pB" class="player right"></div>
+      <div id="pA" class="player me"></div>
+    </section>
+
+    <section class="actions">
+      <button id="playSelected">我出选中的牌</button>
+      <button id="playSmall" class="secondary">我出最小合法牌</button>
+      <button id="pass" class="secondary">我不要</button>
+      <button id="botToMe" class="danger">电脑走到轮到我</button>
+      <button id="nextRound" class="secondary" style="display:none">发下一局并预览进贡</button>
+    </section>
+
+    <div class="hint">
+      先点牌，再出牌。页面现在支持：单张、对子/多张同点、单顺、连对、多张连、癞子补同张、癞子补已有点数、普通炸弹、大小王炸。
+    </div>
+
+    <section>
+      <h3>我的手牌 A</h3>
+      <div id="hand" class="hand"></div>
+    </section>
+
+    <section>
+      <h3>过程日志</h3>
+      <div id="log" class="log"></div>
+    </section>
+  </div>
+
+  <script>
+    const seats = ["A", "B", "C", "D"];
+    const ranks = ["3","4","5","6","7","8","9","10","J","Q","K","A","2"];
+    const suits = ["S","H","C","D"];
+    const sequenceRanks = ["3","4","5","6","7","8","9","10","J","Q","K","A"];
+    const basePower = Object.fromEntries(["3","4","5","6","7","8","9","10","J","Q","K","A"].map((rank, index) => [rank, index + 1]));
+    let state;
+    let selected = new Set();
+
+    function rankPower(rank) {
+      if (rank === "BJ") return 1000;
+      if (rank === "SJ") return 900;
+      if (rank === "LZ") return -1;
+      if (rank === state.levelRank) return 800;
+      if (rank === "2") return 700;
+      return basePower[rank] ?? 0;
+    }
+
+    function makeDeck() {
+      const deck = [];
+      for (let d = 0; d < 4; d++) {
+        for (const suit of suits) {
+          for (const rank of ranks) deck.push({ id: `${d}-${suit}-${rank}`, rank, suit, label: rank + suit });
+        }
+        deck.push({ id: `${d}-SJ`, rank: "SJ", suit: "JOKER", label: "小王" });
+        deck.push({ id: `${d}-BJ`, rank: "BJ", suit: "JOKER", label: "大王" });
+      }
+      for (let i = 0; i < 4; i++) deck.push({ id: `LZ-${i}`, rank: "LZ", suit: "LZ", label: "LZ" });
+      return deck;
+    }
+
+    function shuffle(deck) {
+      const copy = [...deck];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    }
+
+    function sortHand(hand) {
+      hand.sort((a, b) => rankPower(a.rank) - rankPower(b.rank));
+    }
+
+    function start() {
+      startRound({
+        roundNumber: 1,
+        levelRank: "3",
+        log: ["新局开始。你是 A，当前打 3。"]
+      });
+    }
+
+    function startRound(options) {
+      const deck = shuffle(makeDeck());
+      state = {
+        phase: "PLAYING",
+        current: "A",
+        levelRank: options.levelRank,
+        roundNumber: options.roundNumber,
+        lastPlay: null,
+        passes: [],
+        finished: [],
+        lastResult: options.lastResult ?? null,
+        tribute: options.tribute ?? null,
+        hands: { A: [], B: [], C: [], D: [] },
+        log: options.log
+      };
+      deck.forEach((card, index) => state.hands[seats[index % 4]].push(card));
+      seats.forEach(seat => sortHand(state.hands[seat]));
+      if (state.tribute) {
+        state.log.unshift(state.tribute.summary);
+      }
+      selected.clear();
+      render();
+    }
+
+    function teamOf(seat) {
+      return seat === "A" || seat === "C" ? "AC" : "BD";
+    }
+
+    function seatsOfTeam(team) {
+      return team === "AC" ? ["A", "C"] : ["B", "D"];
+    }
+
+    function isActive(seat) {
+      return state.hands[seat].length > 0 && !state.finished.includes(seat);
+    }
+
+    function nextActiveSeat(from) {
+      let cursor = nextSeat(from);
+      for (let i = 0; i < seats.length; i++) {
+        if (isActive(cursor)) return cursor;
+        cursor = nextSeat(cursor);
+      }
+      return null;
+    }
+
+    function nextLevel(rank, step) {
+      const order = ["3","4","5","6","7","8","9","10","J","Q","K","A"];
+      const index = order.indexOf(rank);
+      return order[Math.min(order.length - 1, index + step)];
+    }
+
+    function highestNonLaizi(hand) {
+      return hand
+        .filter(card => card.rank !== "LZ")
+        .sort((a, b) => rankPower(b.rank) - rankPower(a.rank))[0] ?? null;
+    }
+
+    function hasPureJokers(hand, count) {
+      const big = hand.filter(card => card.rank === "BJ").length;
+      const small = hand.filter(card => card.rank === "SJ").length;
+      return big >= count || small >= count;
+    }
+
+    function assessTribute(result) {
+      const loserSeats = result.tributeLoserSeats ?? seatsOfTeam(result.loserTeam);
+      const winnerSeats = seatsOfTeam(result.winnerTeam);
+      if (loserSeats.some(seat => hasPureJokers(state.hands[seat], 4))) {
+        const cards = winnerSeats.map(seat => ({ seat, card: highestNonLaizi(state.hands[seat]) })).filter(item => item.card);
+        return {
+          mode: "反贡",
+          cards,
+          summary: `下一局进贡预览：输家抓到 4 张纯大王或纯小王，触发反贡。赢家贡出：${cards.map(item => `${item.seat}:${item.card.label}`).join("，") || "无"}`
+        };
+      }
+      if (loserSeats.some(seat => hasPureJokers(state.hands[seat], 3))) {
+        return {
+          mode: "抗贡",
+          cards: [],
+          summary: "下一局进贡预览：输家抓到 3 张纯大王或纯小王，触发抗贡，本局免进贡。"
+        };
+      }
+      const cards = loserSeats.map(seat => ({ seat, card: highestNonLaizi(state.hands[seat]) })).filter(item => item.card);
+      return {
+        mode: "常规进贡",
+        cards,
+        summary: `下一局进贡预览：常规进贡。本次进贡人数 ${loserSeats.length} 人。输家贡牌池：${cards.map(item => `${item.seat}:${item.card.label}`).join("，") || "无"}`
+      };
+    }
+
+    function checkRoundEnd() {
+      const firstFinishedSeat = state.finished[0];
+      if (!firstFinishedSeat) return false;
+      const winnerTeam = teamOf(firstFinishedSeat);
+      const winnerTeamDone = seatsOfTeam(winnerTeam).every(seat => state.finished.includes(seat));
+      if (!winnerTeamDone) return false;
+
+      const loserTeam = winnerTeam === "AC" ? "BD" : "AC";
+      const tributeLoserSeats = seatsOfTeam(loserTeam).filter(seat => !state.finished.includes(seat));
+      const loserRemaining = tributeLoserSeats.length;
+      const levelUp = loserRemaining === 2 ? 2 : loserRemaining === 1 ? 1 : 0;
+      state.phase = "ROUND_END";
+      state.lastResult = {
+        winnerTeam,
+        loserTeam,
+        loserRemaining,
+        tributeLoserSeats,
+        levelUp,
+        nextLevelRank: nextLevel(state.levelRank, levelUp)
+      };
+      state.log.unshift(`本局结束：第一名队伍 ${winnerTeam} 获胜，对方剩 ${loserRemaining} 人，升 ${levelUp} 级。下一局打 ${state.lastResult.nextLevelRank}。`);
+      state.lastPlay = null;
+      state.passes = [];
+      return true;
+    }
+
+    function nextSeat(seat) {
+      return seats[(seats.indexOf(seat) + 1) % seats.length];
+    }
+
+    function isLaizi(card) {
+      return card.rank === "LZ";
+    }
+
+    function groupByRank(cards) {
+      const groups = new Map();
+      for (const card of cards) {
+        if (!groups.has(card.rank)) groups.set(card.rank, []);
+        groups.get(card.rank).push(card);
+      }
+      return groups;
+    }
+
+    function consecutiveRanks(orderedRanks) {
+      for (let i = 1; i < orderedRanks.length; i++) {
+        if (sequenceRanks.indexOf(orderedRanks[i]) !== sequenceRanks.indexOf(orderedRanks[i - 1]) + 1) return false;
+      }
+      return true;
+    }
+
+    function analyzeCards(cards) {
+      if (!cards.length) return null;
+      const laizi = cards.filter(isLaizi);
+      const natural = cards.filter(card => !isLaizi(card));
+      if (!natural.length) return null;
+
+      if (cards.length === 4 && cards.every(card => card.rank === "BJ")) {
+        return { type: "JOKER_BOMB_BIG", groupSize: 4, total: 4, mainRank: "BJ", isBomb: true, label: "大王炸" };
+      }
+      if (cards.length === 4 && cards.every(card => card.rank === "SJ")) {
+        return { type: "JOKER_BOMB_SMALL", groupSize: 4, total: 4, mainRank: "SJ", isBomb: true, label: "小王炸" };
+      }
+
+      const sameGroups = groupByRank(natural);
+      if (sameGroups.size === 1) {
+        const rank = natural[0].rank;
+        if (rank === "BJ" || rank === "SJ") {
+          if (!laizi.length) {
+            return { type: "SAME_RANK", groupSize: natural.length, total: natural.length, mainRank: rank, label: natural.length === 1 ? (rank === "BJ" ? "单张大王" : "单张小王") : `${natural.length}张${rank === "BJ" ? "大王" : "小王"}` };
+          }
+        } else if (!laizi.length && natural.length >= 8) {
+          return { type: "BOMB", groupSize: natural.length, total: natural.length, mainRank: rank, isBomb: true, label: `${natural.length}张${rank}炸弹` };
+        } else {
+          return { type: "SAME_RANK", groupSize: cards.length, total: cards.length, mainRank: rank, laiziUsed: laizi.length, label: cards.length === 1 ? `单张${rank}` : `${cards.length}张${rank}` };
+        }
+      }
+
+      if (!laizi.length && cards.length >= 6) {
+        const singleRanks = natural.map(card => card.rank);
+        const unique = [...new Set(singleRanks)];
+        const ordered = unique.sort((a, b) => sequenceRanks.indexOf(a) - sequenceRanks.indexOf(b));
+        if (
+          unique.length === cards.length
+          && ordered.every(rank => sequenceRanks.includes(rank) && rank !== state.levelRank)
+          && consecutiveRanks(ordered)
+        ) {
+          return { type: "STRAIGHT", groupSize: 1, total: cards.length, mainRank: ordered[ordered.length - 1], sequenceLength: ordered.length, label: "单顺" };
+        }
+      }
+
+      if (cards.length >= 6) {
+        const groups = groupByRank(natural);
+        const ordered = [...groups.keys()].sort((a, b) => sequenceRanks.indexOf(a) - sequenceRanks.indexOf(b));
+        if (
+          ordered.length >= 2
+          && ordered.every(rank => sequenceRanks.includes(rank) && rank !== state.levelRank && !["2", "SJ", "BJ"].includes(rank))
+          && consecutiveRanks(ordered)
+          && ![...groups.values()].some(group => group.length >= 8)
+        ) {
+          for (let groupSize = 2; groupSize <= 7; groupSize++) {
+            let needed = 0;
+            let ok = true;
+            for (const rank of ordered) {
+              const count = groups.get(rank).length;
+              if (count > groupSize) ok = false;
+              needed += groupSize - count;
+            }
+            if (ok && needed === laizi.length && groupSize * ordered.length === cards.length) {
+              return { type: "MULTI_RUN", groupSize, total: cards.length, mainRank: ordered[ordered.length - 1], sequenceLength: ordered.length, laiziUsed: laizi.length, label: groupSize === 2 ? "连对" : `${groupSize}张连` };
+            }
+          }
+        }
+      }
+
+      return null;
+    }
+
+    function explainInvalid(cards) {
+      if (!cards.length) return "你还没有选牌。";
+      const ranks = [...new Set(cards.map(card => card.rank))];
+      const hasMixedJokers = cards.every(card => card.rank === "BJ" || card.rank === "SJ") && ranks.length > 1;
+      if (hasMixedJokers) {
+        return "大小王混在一起不是合法同张牌型，也不能组成王炸。";
+      }
+      if (cards.every(card => card.rank === "LZ")) {
+        return "癞子不能单独出，也不能组成纯癞子牌型。";
+      }
+      if (state.lastPlay) {
+        return "这手不能跟：必须同类型、同结构，并且压过桌面上一手；炸弹除外。";
+      }
+      return "这手不是合法牌型。";
+    }
+
+    function canBeat(cards) {
+      const current = analyzeCards(cards);
+      if (!current) return false;
+      if (!state.lastPlay) return true;
+      const previous = state.lastPlay.analysis ?? analyzeCards(state.lastPlay.cards);
+      if (!previous) return true;
+
+      if (current.isBomb || previous.isBomb) {
+        if (!current.isBomb) return false;
+        if (!previous.isBomb) return true;
+        const jokerPower = { JOKER_BOMB_BIG: 3, JOKER_BOMB_SMALL: 2, BOMB: 1 };
+        const diff = (jokerPower[current.type] ?? 0) - (jokerPower[previous.type] ?? 0);
+        if (diff) return diff > 0;
+        if (current.total !== previous.total) return current.total > previous.total;
+        return rankPower(current.mainRank) > rankPower(previous.mainRank);
+      }
+
+      if (current.type !== previous.type) return false;
+      if (current.total !== previous.total) return false;
+      if (current.groupSize !== previous.groupSize) return false;
+      if ((current.sequenceLength ?? 0) !== (previous.sequenceLength ?? 0)) return false;
+      return rankPower(current.mainRank) > rankPower(previous.mainRank);
+    }
+
+    function naturalRankGroups(seat) {
+      const groups = new Map();
+      for (const card of state.hands[seat]) {
+        if (card.rank === "LZ") continue;
+        if (!groups.has(card.rank)) groups.set(card.rank, []);
+        groups.get(card.rank).push(card);
+      }
+      return [...groups.values()].sort((a, b) => rankPower(a[0].rank) - rankPower(b[0].rank));
+    }
+
+    function smallestLeadGroup(seat) {
+      const hand = state.hands[seat];
+      const laizi = hand.filter(card => card.rank === "LZ");
+      for (const group of naturalRankGroups(seat)) {
+        if (group.length >= 8) continue;
+        const candidate = group.length === 4 && (group[0].rank === "BJ" || group[0].rank === "SJ") ? [group[0]] : group;
+        if (laizi.length && group[0].rank !== "BJ" && group[0].rank !== "SJ" && candidate.length + laizi.length === hand.length) {
+          const finishCandidate = [...candidate, ...laizi];
+          if (analyzeCards(finishCandidate)) return finishCandidate;
+        }
+        if (analyzeCards(candidate)) return candidate;
+      }
+      for (const group of naturalRankGroups(seat)) {
+        if (group[0].rank === "BJ" || group[0].rank === "SJ") continue;
+        if (!laizi.length) continue;
+        for (let useLaizi = 1; useLaizi <= laizi.length; useLaizi++) {
+          const candidate = [...group, ...laizi.slice(0, useLaizi)];
+          if (analyzeCards(candidate)) return candidate;
+        }
+      }
+      return [];
+    }
+
+    function smallestBeatGroup(seat) {
+      if (!state.lastPlay) return [];
+      const needSize = state.lastPlay.cards.length;
+      const hand = state.hands[seat];
+      const laizi = hand.filter(card => card.rank === "LZ");
+      for (const group of naturalRankGroups(seat)) {
+        if (group.length < needSize) continue;
+        const candidate = group.slice(0, needSize);
+        if (canBeat(candidate)) return candidate;
+      }
+      for (const group of naturalRankGroups(seat)) {
+        if (group[0].rank === "BJ" || group[0].rank === "SJ") continue;
+        const missing = needSize - group.length;
+        if (missing <= 0 || missing > laizi.length) continue;
+        const candidate = [...group, ...laizi.slice(0, missing)];
+        if (canBeat(candidate)) return candidate;
+      }
+      return [];
+    }
+
+    function play(seat, cards) {
+      if (state.phase !== "PLAYING") {
+        state.log.unshift("本局已经结束，请点击“发下一局并预览进贡”。");
+        render();
+        return false;
+      }
+      if (seat !== state.current) {
+        state.log.unshift(`现在轮到 ${state.current}，不是 ${seat}。请点“电脑走到轮到我”。`);
+        render();
+        return false;
+      }
+      const analysis = analyzeCards(cards);
+      if (!analysis || !canBeat(cards)) {
+        state.log.unshift(`${seat} 这手不能出：${explainInvalid(cards)}`);
+        render();
+        return false;
+      }
+      const ids = new Set(cards.map(card => card.id));
+      state.hands[seat] = state.hands[seat].filter(card => !ids.has(card.id));
+      if (state.hands[seat].length === 0 && !state.finished.includes(seat)) {
+        state.finished.push(seat);
+        state.log.unshift(`${seat} 出完了，当前完成顺序：${state.finished.join(" > ")}`);
+      }
+      state.lastPlay = { seat, cards, analysis };
+      state.passes = [];
+      state.log.unshift(`${seat} 出：${cards.map(card => card.label).join(" ")}（${analysis.label}）`);
+      if (checkRoundEnd()) {
+        selected.clear();
+        render();
+        return true;
+      }
+      state.current = nextActiveSeat(seat) ?? seat;
+      selected.clear();
+      render();
+      if (seat === "A") setTimeout(botToMe, 350);
+      return true;
+    }
+
+    function pass(seat) {
+      if (state.phase !== "PLAYING") {
+        state.log.unshift("本局已经结束，请点击“发下一局并预览进贡”。");
+        render();
+        return;
+      }
+      if (seat !== state.current) {
+        state.log.unshift(`现在轮到 ${state.current}，不是 ${seat}。请点“电脑走到轮到我”。`);
+        render();
+        return;
+      }
+      if (!state.lastPlay) {
+        state.log.unshift("首出不能不要。请出一手牌。");
+        render();
+        return;
+      }
+      state.log.unshift(`${seat} 不要`);
+      state.passes.push(seat);
+      if (state.passes.length >= 3) {
+        const winner = state.lastPlay.seat;
+        state.lastPlay = null;
+        state.passes = [];
+        state.current = isActive(winner) ? winner : (nextActiveSeat(winner) ?? winner);
+        state.log.unshift(`一圈没人压，${state.current} 获得下一轮首出。`);
+      } else {
+        state.current = nextActiveSeat(seat) ?? seat;
+      }
+      selected.clear();
+      render();
+      if (seat === "A") setTimeout(botToMe, 350);
+    }
+
+    function botToMe() {
+      let guard = 0;
+      while (state.phase === "PLAYING" && state.current !== "A" && guard < 200) {
+        const before = state.current;
+        const cards = state.lastPlay ? smallestBeatGroup(before) : smallestLeadGroup(before);
+        if (cards.length) {
+          const analysis = analyzeCards(cards);
+          const ids = new Set(cards.map(card => card.id));
+          state.hands[before] = state.hands[before].filter(card => !ids.has(card.id));
+          if (state.hands[before].length === 0 && !state.finished.includes(before)) {
+            state.finished.push(before);
+            state.log.unshift(`${before} 出完了，当前完成顺序：${state.finished.join(" > ")}`);
+          }
+          state.lastPlay = { seat: before, cards, analysis };
+          state.passes = [];
+          state.log.unshift(`${before} 出：${cards.map(card => card.label).join(" ")}（${analysis.label}）`);
+          if (checkRoundEnd()) break;
+          state.current = nextActiveSeat(before) ?? before;
+        } else if (state.lastPlay) {
+          state.log.unshift(`${before} 不要`);
+          state.passes.push(before);
+          if (state.passes.length >= 3) {
+            const winner = state.lastPlay.seat;
+            state.lastPlay = null;
+            state.passes = [];
+            state.current = isActive(winner) ? winner : (nextActiveSeat(winner) ?? winner);
+            state.log.unshift(`一圈没人压，${state.current} 获得下一轮首出。`);
+          } else {
+            state.current = nextActiveSeat(before) ?? before;
+          }
+        } else {
+          state.log.unshift(`${before} 没有可自动首出的合法牌。若它只剩纯癞子，按规则不能单独出癞子，预览会停在这里。`);
+          break;
+        }
+        guard++;
+      }
+      render();
+    }
+
+    function startNextRound() {
+      if (!state.lastResult) {
+        state.log.unshift("还没有上一局结算，不能预览进贡。");
+        render();
+        return;
+      }
+      const previousResult = state.lastResult;
+      const nextRank = previousResult.nextLevelRank;
+      startRound({
+        roundNumber: state.roundNumber + 1,
+        levelRank: nextRank,
+        lastResult: previousResult,
+        log: [`第 ${state.roundNumber + 1} 局开始，当前打 ${nextRank}。先展示进贡预览。`]
+      });
+      state.tribute = assessTribute(previousResult);
+      state.log.unshift(state.tribute.summary);
+      render();
+    }
+
+    function renderPlayer(seat) {
+      const el = document.querySelector("#p" + seat);
+      el.className = "player " + (seat === "C" ? "top" : seat === "B" ? "right" : seat === "D" ? "left" : "me") + (state.current === seat ? " active" : "");
+      el.innerHTML = `<div class="name">${seat}${seat === "A" ? "（你）" : "（电脑）"}</div><div>${state.hands[seat].length} 张牌</div>`;
+    }
+
+    function render() {
+      const myTurn = state.current === "A";
+      if (state.phase === "ROUND_END") {
+        document.querySelector("#mainText").textContent = "本局结束";
+        document.querySelector("#subText").textContent = `${state.lastResult.winnerTeam} 获胜，升 ${state.lastResult.levelUp} 级；下一局打 ${state.lastResult.nextLevelRank}。点击“发下一局并预览进贡”。`;
+      } else {
+        document.querySelector("#mainText").textContent = myTurn ? "轮到你出牌" : `电脑 ${state.current} 正在思考`;
+        document.querySelector("#subText").textContent = myTurn
+          ? `第 ${state.roundNumber} 局，当前打 ${state.levelRank}，${state.levelRank} 是级牌。点下面你的手牌，再点“我出选中的牌”。`
+          : `第 ${state.roundNumber} 局，当前打 ${state.levelRank}，${state.levelRank} 是级牌。电脑会自动走；如果停住了，点“电脑走到轮到我”。`;
+      }
+      seats.forEach(renderPlayer);
+      document.querySelector("#center").innerHTML = state.lastPlay
+        ? `<strong>桌面上一手</strong><br>${state.lastPlay.seat} 出了 ${state.lastPlay.analysis?.label ?? ""}<br>${state.lastPlay.cards.map(card => card.label).join(" ")}`
+        : state.phase === "ROUND_END"
+          ? `<strong>结算</strong><br>胜方：${state.lastResult.winnerTeam}<br>升级：${state.lastResult.levelUp}<br>下一局打：${state.lastResult.nextLevelRank}`
+          : state.tribute
+            ? `<strong>进贡预览</strong><br>${state.tribute.mode}<br>${state.tribute.cards.map(item => `${item.seat}: ${item.card.label}`).join("<br>") || "无贡牌"}`
+            : "<strong>桌面为空</strong><br>当前玩家可以首出";
+      document.querySelector("#hand").innerHTML = state.hands.A.map(card => {
+        const classes = ["card"];
+        if (selected.has(card.id)) classes.push("selected");
+        if (card.rank === state.levelRank) classes.push("level");
+        if (card.rank === "LZ") classes.push("laizi");
+        const text = card.rank === state.levelRank ? `${card.label}★` : card.label;
+        return `<div class="${classes.join(" ")}" data-id="${card.id}">${text}</div>`;
+      }).join("");
+      document.querySelector("#log").innerHTML = state.log.map(line => `<div>${line}</div>`).join("");
+      document.querySelector("#nextRound").style.display = state.phase === "ROUND_END" ? "inline-block" : "none";
+    }
+
+    document.querySelector("#hand").addEventListener("click", event => {
+      const card = event.target.closest(".card");
+      if (!card) return;
+      const id = card.dataset.id;
+      if (selected.has(id)) selected.delete(id);
+      else selected.add(id);
+      render();
+    });
+    document.querySelector("#playSelected").addEventListener("click", () => {
+      const cards = state.hands.A.filter(card => selected.has(card.id));
+      play("A", cards);
+    });
+    document.querySelector("#playSmall").addEventListener("click", () => {
+      const cards = state.lastPlay ? smallestBeatGroup("A") : smallestLeadGroup("A");
+      if (cards.length) play("A", cards);
+      else {
+        state.log.unshift("我暂时没有能自动出的牌，可以点“我不要”。");
+        render();
+      }
+    });
+    document.querySelector("#pass").addEventListener("click", () => pass("A"));
+    document.querySelector("#botToMe").addEventListener("click", botToMe);
+    document.querySelector("#nextRound").addEventListener("click", startNextRound);
+    document.querySelector("#newGame").addEventListener("click", start);
+    start();
+  </script>
+</body>
+</html>

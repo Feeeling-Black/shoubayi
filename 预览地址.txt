@@ -1,0 +1,9 @@
+如果 127.0.0.1 打不开，请不要再用 localhost/127.0.0.1。
+
+直接打开这个文件：
+
+C:\Users\Administrator\Documents\Hand one\public\easy-preview.html
+
+或者双击：
+
+C:\Users\Administrator\Documents\Hand one\打开简单预览.cmd

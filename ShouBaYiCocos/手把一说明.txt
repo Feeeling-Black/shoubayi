@@ -1,0 +1,17 @@
+这是手把一的 Cocos Creator 2.4 单机项目。
+
+打开方式：
+1. 打开 Cocos Creator v2.4.13。
+2. 点“打开其他项目”。
+3. 选择这个文件夹：
+   C:\Users\Administrator\Documents\Hand one\ShouBaYiCocos
+
+当前已做：
+- 单机 4 人桌，A 是玩家，B/C/D 是电脑。
+- 出牌顺序按 A -> B -> C -> D。
+- 支持多局、升级、进贡预览、电脑自动出牌。
+- 已把网页调过的核心规则同步进 Cocos 版。
+
+下一步建议：
+- 先在 Cocos 里跑通单机手感。
+- 再做正式美术界面和联网后端。

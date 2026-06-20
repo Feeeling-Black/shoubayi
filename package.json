@@ -1,0 +1,16 @@
+{
+  "name": "shoubayi-rules-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "node src/dev/SinglePlayerDemo.ts",
+    "online": "node src/dev/OnlineServer.ts",
+    "preview": "node src/dev/PreviewServer.ts",
+    "start": "node src/dev/OnlineServer.ts",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

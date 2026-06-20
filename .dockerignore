@@ -1,0 +1,10 @@
+.git
+.agents
+.codex
+node_modules
+ShouBaYiCocos/library
+ShouBaYiCocos/local
+ShouBaYiCocos/temp
+preview-server*.log
+*.png
+!ShouBaYiCocos/assets/resources/ui/Hand/*.png

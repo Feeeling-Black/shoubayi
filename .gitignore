@@ -1,0 +1,18 @@
+node_modules/
+
+# Logs and local preview output
+*.log
+preview-server*.log
+
+# Generated Cocos cache/state
+ShouBaYiCocos/library/
+ShouBaYiCocos/temp/
+ShouBaYiCocos/local/
+
+# Local mock screenshots
+one-card-bubble-preview*.png
+round-end-layout-mock.png
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

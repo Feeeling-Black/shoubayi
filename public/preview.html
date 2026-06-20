@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>手把一 静态预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", Arial, sans-serif;
+      background: #0e3d2f;
+      color: #f8f3dd;
+    }
+    header {
+      padding: 16px 18px;
+      background: #092a21;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    main {
+      padding: 18px;
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 16px;
+    }
+    button, select {
+      border: 0;
+      border-radius: 6px;
+      padding: 9px 12px;
+      font-size: 14px;
+    }
+    button {
+      background: #efc34a;
+      color: #151515;
+      cursor: pointer;
+    }
+    button.secondary { background: #dcebe2; }
+    .panel {
+      background: #15543f;
+      border: 1px solid #2c765e;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .status {
+      background: #f8f3dd;
+      color: #12372c;
+      border-radius: 8px;
+      padding: 14px;
+      margin-bottom: 12px;
+      line-height: 1.65;
+      font-size: 15px;
+    }
+    .status strong {
+      font-size: 20px;
+      color: #0b3328;
+    }
+    .help {
+      background: #0b3328;
+      border-radius: 8px;
+      padding: 12px;
+      color: #f8f3dd;
+      line-height: 1.75;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+    .help b { color: #efc34a; }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .seat {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px;
+      margin-bottom: 8px;
+      border-radius: 8px;
+      background: #0b3328;
+    }
+    .seat.active { outline: 2px solid #efc34a; }
+    .meta, .logs {
+      color: #e5eee8;
+      line-height: 1.7;
+      font-size: 14px;
+    }
+    .logs {
+      max-height: 240px;
+      overflow: auto;
+      color: #f7e59e;
+    }
+    .hand {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-height: 360px;
+      align-content: flex-start;
+    }
+    .card {
+      width: 58px;
+      height: 78px;
+      display: grid;
+      place-items: center;
+      border-radius: 7px;
+      background: #fbf8e9;
+      color: #111;
+      font-weight: 700;
+      cursor: pointer;
+      border: 2px solid transparent;
+      user-select: none;
+      box-shadow: 0 5px 10px rgba(0,0,0,.22);
+    }
+    .card.selected {
+      transform: translateY(-7px);
+      border-color: #efc34a;
+    }
+    .note {
+      margin-top: 10px;
+      color: #cdded5;
+      font-size: 13px;
+    }
+    @media (max-width: 820px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>手把一 静态预览</strong>
+    <div class="toolbar">
+      <select id="seat">
+        <option>A</option>
+        <option>B</option>
+        <option>C</option>
+        <option>D</option>
+      </select>
+      <button id="watchCurrent" class="secondary">切到当前玩家</button>
+      <button id="newGame">重新发牌</button>
+      <button id="auto" class="secondary">自动走一步</button>
+    </div>
+  </header>
+  <main>
+    <section class="panel">
+      <div id="status" class="status"></div>
+      <div class="help">
+        <b>怎么看：</b><br>
+        1. 黄色边框的座位 = 当前轮到谁。<br>
+        2. 上方下拉框 = 你现在看的手牌视角。<br>
+        3. 要手动出牌，先切到当前玩家，再点牌，再点“出选中的牌”。<br>
+        4. 看不懂流程时，直接点“自动走一步”。
+      </div>
+      <h3>详细状态</h3>
+      <div id="meta" class="meta"></div>
+      <h3>座位</h3>
+      <div id="seats"></div>
+      <h3>日志</h3>
+      <div id="logs" class="logs"></div>
+      <div class="note">这是不用本地服务的静态预览页，用来先看界面和单机流程。正式规则仍在 TypeScript 后端核心里。</div>
+    </section>
+    <section class="panel">
+      <div class="toolbar">
+        <button id="play">出选中的牌</button>
+        <button id="pass" class="secondary">过牌</button>
+        <button id="clear" class="secondary">清空选择</button>
+        <span id="selectionInfo" class="meta"></span>
+      </div>
+      <div id="hand" class="hand"></div>
+    </section>
+  </main>
+  <script>
+    const seats = ["A", "B", "C", "D"];
+    const ranks = ["3","4","5","6","7","8","9","10","J","Q","K","A","2"];
+    const suits = ["S","H","C","D"];
+    let state;
+    let selected = new Set();
+
+    function makeDeck() {
+      const deck = [];
+      for (let d = 0; d < 4; d++) {
+        for (const suit of suits) {
+          for (const rank of ranks) deck.push({ id: `D${d}-${suit}-${rank}`, rank, suit, label: rank + suit });
+        }
+        deck.push({ id: `D${d}-SJ`, rank: "SJ", suit: "JOKER", label: "小王" });
+        deck.push({ id: `D${d}-BJ`, rank: "BJ", suit: "JOKER", label: "大王" });
+      }
+      for (let i = 0; i < 4; i++) deck.push({ id: `LZ-${i}`, rank: "LZ", suit: "LZ", label: "LZ" });
+      return deck;
+    }
+
+    function shuffle(deck) {
+      const copy = [...deck];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    }
+
+    function newGame() {
+      const deck = shuffle(makeDeck());
+      state = {
+        current: "A",
+        levelRank: "3",
+        lastPlay: null,
+        passed: [],
+        logs: ["重新发牌，A 首出"],
+        hands: { A: [], B: [], C: [], D: [] }
+      };
+      deck.forEach((card, index) => state.hands[seats[index % 4]].push(card));
+      selected.clear();
+      render();
+    }
+
+    function nextSeat(seat) {
+      return seats[(seats.indexOf(seat) + 1) % 4];
+    }
+
+    function selectedSeat() {
+      return document.querySelector("#seat").value;
+    }
+
+    function playCards() {
+      const seat = selectedSeat();
+      if (seat !== state.current) {
+        state.logs.unshift(`${seat} 不能出牌：当前轮到 ${state.current}`);
+        render();
+        return;
+      }
+      const ids = [...selected];
+      if (ids.length === 0) {
+        state.logs.unshift(`${seat} 没有选择牌`);
+        render();
+        return;
+      }
+      const hand = state.hands[seat];
+      const cards = hand.filter(card => selected.has(card.id));
+      state.hands[seat] = hand.filter(card => !selected.has(card.id));
+      state.lastPlay = { seat, cards };
+      state.passed = [];
+      state.current = nextSeat(seat);
+      state.logs.unshift(`${seat} 出 ${cards.map(card => card.label).join(" ")}`);
+      selected.clear();
+      render();
+    }
+
+    function pass() {
+      const seat = selectedSeat();
+      if (seat !== state.current) {
+        state.logs.unshift(`${seat} 不能过牌：当前轮到 ${state.current}`);
+        render();
+        return;
+      }
+      if (!state.lastPlay) {
+        state.logs.unshift(`${seat} 首出不能过牌`);
+        render();
+        return;
+      }
+      state.passed.push(seat);
+      state.logs.unshift(`${seat} 过牌`);
+      if (state.passed.length >= 3) {
+        state.current = state.lastPlay.seat;
+        state.lastPlay = null;
+        state.passed = [];
+        state.logs.unshift(`一圈无人压牌，${state.current} 重新首出`);
+      } else {
+        state.current = nextSeat(seat);
+      }
+      selected.clear();
+      render();
+    }
+
+    function autoStep() {
+      document.querySelector("#seat").value = state.current;
+      if (state.lastPlay) {
+        pass();
+        return;
+      }
+      const hand = state.hands[state.current];
+      if (!hand.length) return;
+      selected = new Set([hand[0].id]);
+      playCards();
+    }
+
+    function render() {
+      const seat = selectedSeat();
+      const isYourTurn = seat === state.current;
+      document.querySelector("#status").innerHTML = [
+        `<strong>${isYourTurn ? "轮到你看的这个座位出牌" : "现在轮到 " + state.current + " 出牌"}</strong>`,
+        `你正在看：${seat} 的手牌`,
+        selected.size ? `已选中：${selected.size} 张` : "还没有选牌",
+        state.lastPlay ? `上一手：${state.lastPlay.seat} 出 ${state.lastPlay.cards.map(card => card.label).join(" ")}` : "现在是首出，可以出任意合法牌型"
+      ].join("<br>");
+
+      document.querySelector("#meta").innerHTML = [
+        `当前座位：${state.current}`,
+        `你的视角：${seat}`,
+        `当前级牌：${state.levelRank}`,
+        state.lastPlay ? `上一手：${state.lastPlay.seat} 出 ${state.lastPlay.cards.map(card => card.label).join(" ")}` : "当前为首出"
+      ].join("<br>");
+
+      document.querySelector("#seats").innerHTML = seats.map(item =>
+        `<div class="seat ${item === state.current ? "active" : ""}"><span>${item}</span><span>${state.hands[item].length} 张</span></div>`
+      ).join("");
+
+      document.querySelector("#logs").innerHTML = state.logs.map(line => `<div>${line}</div>`).join("");
+
+      document.querySelector("#hand").innerHTML = state.hands[seat].map(card =>
+        `<div class="card ${selected.has(card.id) ? "selected" : ""}" data-id="${card.id}">${card.label}</div>`
+      ).join("");
+
+      document.querySelector("#selectionInfo").textContent = selected.size
+        ? `已选 ${selected.size} 张`
+        : "点下面的牌进行选择";
+    }
+
+    document.querySelector("#hand").addEventListener("click", event => {
+      const card = event.target.closest(".card");
+      if (!card) return;
+      const id = card.dataset.id;
+      if (selected.has(id)) selected.delete(id);
+      else selected.add(id);
+      render();
+    });
+    document.querySelector("#seat").addEventListener("change", () => { selected.clear(); render(); });
+    document.querySelector("#watchCurrent").addEventListener("click", () => {
+      document.querySelector("#seat").value = state.current;
+      selected.clear();
+      render();
+    });
+    document.querySelector("#newGame").addEventListener("click", newGame);
+    document.querySelector("#play").addEventListener("click", playCards);
+    document.querySelector("#pass").addEventListener("click", pass);
+    document.querySelector("#clear").addEventListener("click", () => { selected.clear(); render(); });
+    document.querySelector("#auto").addEventListener("click", autoStep);
+
+    newGame();
+  </script>
+</body>
+</html>
