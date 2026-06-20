@@ -19,6 +19,7 @@ type OnlineRoom = {
   code: string;
   room: Room;
   players: Partial<Record<Seat, Player>>;
+  tableCards: Partial<Record<Seat, Card[]>>;
   logs: string[];
   version: number;
   started: boolean;
@@ -62,6 +63,14 @@ function cardImage(card: Card): string {
   return `/hand/${card.rank}-of-${suits[card.suit]}.png`;
 }
 
+function publicCard(card: Card) {
+  return {
+    ...card,
+    label: cardLabel(card),
+    image: cardImage(card)
+  };
+}
+
 function publicRoomState(online: OnlineRoom) {
   return {
     code: online.code,
@@ -100,17 +109,18 @@ function snapshotFor(online: OnlineRoom, playerId: string) {
     context: snapshot.context,
     currentSeat: snapshot.currentSeat,
     hand: snapshot.hand.map((card) => ({
-      ...card,
-      label: cardLabel(card),
-      image: cardImage(card)
+      ...publicCard(card)
     })),
     handCounts: snapshot.handCounts,
     lastPlay: snapshot.lastPlay
       ? {
           ...snapshot.lastPlay,
-          cards: lastPlayCards
+          cards: online.tableCards[snapshot.lastPlay.playerId as Seat]?.map(publicCard) ?? lastPlayCards
         }
       : undefined,
+    tableCards: Object.fromEntries(
+      SEATS.map((seat) => [seat, (online.tableCards[seat] ?? []).map(publicCard)])
+    ),
     passedSeats: snapshot.passedSeats,
     finishedOrder: snapshot.finishedOrder,
     result: snapshot.result,
@@ -124,6 +134,7 @@ function createOnlineRoom(nickname: string): { online: OnlineRoom; player: Playe
     code,
     room: new Room(code, createSeatPlayerIds(code)),
     players: {},
+    tableCards: {},
     logs: [],
     version: 1,
     started: false
@@ -156,6 +167,7 @@ function startRoom(online: OnlineRoom) {
   const count = Object.values(online.players).filter(Boolean).length;
   if (count < 4) throw new Error('NEED_FOUR_PLAYERS');
   online.room.startRound({ levelRank: '3' });
+  online.tableCards = {};
   online.started = true;
   online.version += 1;
   online.logs.unshift('牌局开始');
@@ -184,61 +196,447 @@ function pageHtml(): string {
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>手把一联机原型</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>手把一联机</title>
   <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: "Microsoft YaHei", Arial, sans-serif; background: #0e3428; color: #f8f1da; }
-    header { padding: 12px; background: #0648b7; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    input, button { height: 36px; border-radius: 8px; border: 0; padding: 0 12px; font-size: 15px; }
-    button { background: #f1c04f; color: #1a1308; font-weight: 700; }
-    main { padding: 12px; display: grid; gap: 12px; }
-    .panel { background: rgba(0,0,0,.24); border: 1px solid rgba(255,255,255,.15); border-radius: 10px; padding: 12px; }
-    .seats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-    .seat { padding: 10px; border-radius: 8px; background: rgba(255,255,255,.08); }
-    .current { outline: 2px solid #f1c04f; }
-    .hand { display: flex; flex-wrap: wrap; align-items: flex-start; min-height: 180px; }
-    .card { width: 58px; height: 81px; margin-left: -18px; border-radius: 5px; background: #fff; border: 2px solid transparent; overflow: hidden; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      font-family: "Microsoft YaHei", Arial, sans-serif;
+      color: #fff8dc;
+      background: #1f1f1f;
+      user-select: none;
+    }
+    button, input { font-family: inherit; }
+    .stage {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      min-height: 520px;
+      overflow: hidden;
+      background: #123b2a url('/ui/table-bg-v1.png') center / cover no-repeat;
+    }
+    .stage:after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at 50% 54%, rgba(0,0,0,0) 0 46%, rgba(0,0,0,.18) 100%);
+    }
+    .topbar {
+      position: absolute;
+      z-index: 20;
+      top: max(10px, env(safe-area-inset-top));
+      left: 50%;
+      width: min(760px, calc(100vw - 18px));
+      height: 42px;
+      transform: translateX(-50%);
+      display: grid;
+      grid-template-columns: 145px 100px 82px 126px 100px 100px;
+      align-items: center;
+      padding: 0 12px;
+      border-radius: 19px;
+      color: #eaf5ff;
+      font-size: 18px;
+      font-weight: 700;
+      text-shadow: 0 1px 2px rgba(0,0,0,.45);
+      background: linear-gradient(180deg, #116ee0 0%, #0751bd 48%, #073a93 100%);
+      border: 1px solid rgba(125, 194, 255, .55);
+      box-shadow: inset 0 2px 0 rgba(255,255,255,.22), inset 0 -2px 0 rgba(0,33,92,.5), 0 2px 8px rgba(0,0,0,.22);
+    }
+    .topbar span { min-width: 0; white-space: nowrap; text-align: center; border-left: 1px solid rgba(182,220,255,.25); }
+    .topbar span:first-child { border-left: 0; text-align: left; }
+    .turn { color: #ffec3d; }
+    .pill {
+      width: 94px;
+      justify-self: center;
+      height: 28px;
+      line-height: 28px;
+      border-radius: 16px;
+      box-shadow: inset 0 1px 1px rgba(255,255,255,.35), inset 0 -2px 3px rgba(0,0,0,.22);
+    }
+    .blue { background: linear-gradient(180deg, #5b9df4, #1164d9 48%, #0a42ab); }
+    .red { background: linear-gradient(180deg, #d75b69, #b7364b 50%, #7f2135); }
+    .join-box {
+      position: absolute;
+      z-index: 60;
+      top: 72px;
+      left: 50%;
+      width: min(420px, calc(100vw - 24px));
+      transform: translateX(-50%);
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+      border-radius: 10px;
+      background: rgba(4, 33, 39, .72);
+      border: 1px solid rgba(255, 223, 128, .38);
+      box-shadow: 0 8px 22px rgba(0,0,0,.28);
+    }
+    .join-box input {
+      width: 100%;
+      height: 34px;
+      border: 1px solid rgba(255,255,255,.28);
+      border-radius: 7px;
+      padding: 0 10px;
+      color: #1f2a30;
+      font-size: 15px;
+      background: rgba(255,255,255,.92);
+      outline: 0;
+    }
+    .btn {
+      min-width: 86px;
+      height: 36px;
+      border: 0;
+      border-radius: 20px;
+      color: #fff;
+      font-size: 17px;
+      font-weight: 800;
+      text-shadow: 0 1px 2px rgba(0,0,0,.55);
+      box-shadow: inset 0 2px 1px rgba(255,255,255,.45), inset 0 -3px 4px rgba(70,30,8,.4), 0 3px 7px rgba(0,0,0,.22);
+    }
+    .btn:disabled { filter: grayscale(.35); opacity: .58; }
+    #start { grid-column: 1 / -1; }
+    .orange { background: linear-gradient(180deg, #ffce54, #e68d19 48%, #9d5511); }
+    .brown { background: linear-gradient(180deg, #46576a, #273648 50%, #101821); }
+    .seat {
+      position: absolute;
+      z-index: 12;
+      width: 224px;
+      height: 126px;
+      color: #fff7da;
+    }
+    .seat.a { left: 28px; bottom: 40px; }
+    .seat.b { right: 34px; top: 232px; }
+    .seat.c { left: 50%; top: 112px; transform: translateX(-50%); }
+    .seat.d { left: 34px; top: 232px; }
+    .seat-panel {
+      position: absolute;
+      inset: 28px 0 10px 58px;
+      background: rgba(2, 24, 21, .48);
+    }
+    .seat.b .seat-panel { inset: 28px 58px 10px 0; }
+    .avatar {
+      position: absolute;
+      width: 106px;
+      height: 106px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #4b2c12;
+      font-size: 28px;
+      font-weight: 900;
+      background: #050505;
+      background-image: url('/ui/avatar-fill-2.png');
+      background-size: cover;
+      text-shadow: 0 1px 1px rgba(255,211,110,.25);
+    }
+    .avatar:after {
+      content: "";
+      position: absolute;
+      inset: -12px;
+      background: url('/ui/Avatar-frame-2(256).png') center / contain no-repeat;
+    }
+    .seat.a .avatar {
+      width: 126px;
+      height: 126px;
+      background-image: url('/ui/avatar-fill.png');
+    }
+    .seat.a .avatar:after { inset: -16px; background-image: url('/ui/Avatar-frame（256）.png'); }
+    .seat.a .avatar, .seat.d .avatar { left: 0; top: 0; }
+    .seat.b .avatar { right: 0; top: 0; }
+    .seat.c .avatar { left: 4px; top: 0; }
+    .seat-info {
+      position: absolute;
+      left: 108px;
+      top: 34px;
+      min-width: 100px;
+      text-shadow: 0 2px 3px rgba(0,0,0,.65);
+    }
+    .seat.b .seat-info { left: auto; right: 108px; text-align: right; }
+    .name { font-size: 20px; font-weight: 900; white-space: nowrap; }
+    .team-tag {
+      display: inline-block;
+      margin-top: 8px;
+      width: 88px;
+      height: 30px;
+      line-height: 30px;
+      text-align: center;
+      border-radius: 16px;
+      font-size: 17px;
+      font-weight: 900;
+      box-shadow: inset 0 2px 1px rgba(255,255,255,.42), inset 0 -2px 4px rgba(0,0,0,.28);
+    }
+    .count {
+      margin-top: 6px;
+      font-size: 14px;
+      color: #e7f0ed;
+    }
+    .seat.current .avatar { filter: drop-shadow(0 0 10px rgba(255,215,80,.95)); }
+    .seat.current .seat-panel { outline: 2px solid rgba(255, 220, 88, .72); }
+    .seat.passed .count { color: #ffe668; font-size: 22px; font-weight: 900; }
+    .center {
+      position: absolute;
+      z-index: 10;
+      left: 50%;
+      top: 42%;
+      width: min(430px, 56vw);
+      min-height: 84px;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      text-shadow: 0 2px 3px rgba(0,0,0,.55);
+    }
+    .center-line {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: #ecffe7;
+      font-size: 26px;
+      font-weight: 900;
+    }
+    .center-line:before, .center-line:after {
+      content: "";
+      flex: 1;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, rgba(219,255,229,.7), transparent);
+    }
+    .center-tip { margin-top: 6px; color: rgba(230,250,236,.8); font-size: 15px; font-weight: 700; }
+    .play-zone {
+      position: absolute;
+      z-index: 11;
+      display: flex;
+      align-items: flex-start;
+      min-width: 170px;
+      min-height: 86px;
+      pointer-events: none;
+    }
+    .play-zone.a { left: 50%; bottom: 174px; transform: translateX(-50%); }
+    .play-zone.b { right: 260px; top: 294px; justify-content: flex-end; }
+    .play-zone.c { left: 50%; top: 212px; transform: translateX(-50%); }
+    .play-zone.d { left: 260px; top: 294px; }
+    .mini-card {
+      width: 48px;
+      height: 67px;
+      margin-left: -13px;
+      border-radius: 4px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(0,0,0,.2);
+    }
+    .mini-card:first-child { margin-left: 0; }
+    .mini-card img { width: 100%; height: 100%; display: block; }
+    .action-bar {
+      position: absolute;
+      z-index: 30;
+      left: 50%;
+      bottom: 122px;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 44px;
+      align-items: center;
+    }
+    .action-bar .btn { width: 132px; }
+    .hand-status {
+      position: absolute;
+      z-index: 18;
+      left: 50%;
+      bottom: 84px;
+      width: min(700px, calc(100vw - 190px));
+      height: 30px;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      border-radius: 15px;
+      color: #ffe7a0;
+      font-size: 15px;
+      background: rgba(5, 31, 28, .58);
+      border: 1px solid rgba(255, 223, 115, .22);
+      text-shadow: 0 1px 2px rgba(0,0,0,.6);
+    }
+    .hand {
+      position: absolute;
+      z-index: 24;
+      left: 50%;
+      bottom: 8px;
+      width: min(940px, calc(100vw - 12px));
+      height: 108px;
+      transform: translateX(-50%);
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;
+      justify-content: center;
+      overflow: visible;
+    }
+    .card {
+      position: relative;
+      width: 54px;
+      height: 76px;
+      margin-left: -17px;
+      margin-bottom: -6px;
+      border-radius: 5px;
+      overflow: visible;
+      background: #fff;
+      border: 2px solid transparent;
+      transform: translateY(0);
+      transition: transform .08s ease, filter .08s ease, border-color .08s ease;
+    }
     .card:first-child { margin-left: 0; }
-    .card.selected { border-color: #f1c04f; transform: translateY(-8px); }
-    .card img { width: 100%; height: 100%; display: block; }
-    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-    .muted { color: #d8e7df; }
-    .logs { max-height: 130px; overflow: auto; font-size: 13px; color: #f7db83; }
+    .card img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      border-radius: 4px;
+      box-shadow: 0 1px 2px rgba(0,0,0,.14);
+      pointer-events: none;
+    }
+    .card.selected {
+      border-color: #efc84f;
+      transform: translateY(-13px);
+      filter: drop-shadow(0 4px 5px rgba(0,0,0,.28));
+      z-index: 5;
+    }
+    .card.level-card {
+      border-color: #d7aa33;
+    }
+    .card.level-card:after {
+      content: "★";
+      position: absolute;
+      left: 3px;
+      bottom: 2px;
+      font-size: 11px;
+      line-height: 1;
+      color: #d7aa33;
+      text-shadow: 0 1px 1px rgba(255,255,255,.55);
+      pointer-events: none;
+    }
+    .toast {
+      position: absolute;
+      z-index: 90;
+      left: 50%;
+      top: 50%;
+      min-width: 260px;
+      transform: translate(-50%, -50%);
+      padding: 13px 20px;
+      border-radius: 18px;
+      text-align: center;
+      color: #fff3c4;
+      font-size: 18px;
+      font-weight: 800;
+      background: rgba(0,0,0,.72);
+      border: 1px solid rgba(255,220,120,.75);
+      display: none;
+    }
+    .log {
+      position: absolute;
+      z-index: 16;
+      left: 50%;
+      bottom: 2px;
+      transform: translateX(-50%);
+      width: min(900px, calc(100vw - 24px));
+      color: #ffe89a;
+      font-size: 13px;
+      text-align: left;
+      opacity: .9;
+      pointer-events: none;
+    }
+    @media (max-width: 760px) {
+      .topbar { grid-template-columns: 1fr 72px 56px 76px; height: 38px; font-size: 14px; }
+      .topbar .pill { display: none; }
+      .join-box { top: 58px; }
+      .join-box input { height: 32px; }
+      .join-box .btn { min-width: 76px; height: 32px; font-size: 15px; }
+      .seat { transform: scale(.72); transform-origin: center; }
+      .seat.a { left: -34px; bottom: 56px; }
+      .seat.b { right: -48px; top: 190px; }
+      .seat.c { top: 96px; transform: translateX(-50%) scale(.72); }
+      .seat.d { left: -48px; top: 190px; }
+      .play-zone.b { right: 120px; }
+      .play-zone.d { left: 120px; }
+      .action-bar { bottom: 112px; gap: 12px; }
+      .action-bar .btn { width: 96px; font-size: 16px; }
+      .hand-status { width: calc(100vw - 24px); bottom: 78px; }
+      .card { width: 48px; height: 67px; margin-left: -19px; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <strong>手把一联机</strong>
-    <input id="nickname" placeholder="昵称" />
-    <input id="roomCode" placeholder="房号" />
-    <button id="create">创建房间</button>
-    <button id="join">加入房间</button>
-    <button id="start">开始</button>
-  </header>
-  <main>
-    <section class="panel">
-      <div id="status" class="muted">先创建或加入房间</div>
-      <div id="seats" class="seats"></div>
+  <main class="stage">
+    <section class="topbar">
+      <span id="roomLabel">房号 --</span>
+      <span id="roundLabel">第 1 局</span>
+      <span id="levelLabel">打 3</span>
+      <span id="turnLabel" class="turn">等待</span>
+      <span id="blueLabel" class="pill blue">BLUE 3</span>
+      <span id="redLabel" class="pill red">RED 3</span>
     </section>
-    <section class="panel">
-      <div class="toolbar">
-        <button id="play">出牌</button>
-        <button id="pass">不出</button>
-      </div>
-      <div id="hand" class="hand"></div>
+
+    <section id="joinBox" class="join-box">
+      <input id="nickname" maxlength="12" placeholder="昵称" />
+      <input id="roomCode" inputmode="numeric" maxlength="6" placeholder="房号" />
+      <button id="create" class="btn orange">创建</button>
+      <button id="join" class="btn blue">加入</button>
+      <button id="start" class="btn brown">开始</button>
     </section>
-    <section class="panel logs" id="logs"></section>
+
+    <section id="seatA" class="seat a"></section>
+    <section id="seatB" class="seat b"></section>
+    <section id="seatC" class="seat c"></section>
+    <section id="seatD" class="seat d"></section>
+
+    <div id="zoneA" class="play-zone a"></div>
+    <div id="zoneB" class="play-zone b"></div>
+    <div id="zoneC" class="play-zone c"></div>
+    <div id="zoneD" class="play-zone d"></div>
+
+    <section class="center">
+      <div id="centerText" class="center-line">等待开局</div>
+      <div id="centerTip" class="center-tip">4 人到齐后开始</div>
+    </section>
+
+    <section class="action-bar">
+      <button id="play" class="btn orange">出牌</button>
+      <button id="hint" class="btn blue">提示</button>
+      <button id="pass" class="btn brown">不要</button>
+    </section>
+
+    <section class="hand-status">
+      <span id="selectionLabel">未选牌</span>
+      <span id="hintLabel">提示可自动选牌</span>
+    </section>
+    <section id="hand" class="hand"></section>
+    <section id="log" class="log"></section>
+    <div id="toast" class="toast"></div>
   </main>
+
   <script>
     const state = {
       roomCode: localStorage.getItem('roomCode') || '',
       playerId: localStorage.getItem('playerId') || '',
-      selected: new Set()
+      selected: new Set(),
+      lastSnapshot: null
     };
+    const seats = ['A', 'B', 'C', 'D'];
+    const teams = { A: 'BLUE', C: 'BLUE', B: 'RED', D: 'RED' };
     const $ = (id) => document.getElementById(id);
     $('roomCode').value = state.roomCode;
     $('nickname').value = localStorage.getItem('nickname') || '';
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[char]);
+    }
+
+    function toast(message) {
+      $('toast').textContent = message;
+      $('toast').style.display = 'block';
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => $('toast').style.display = 'none', 1600);
+    }
 
     async function api(path, body) {
       const response = await fetch(path, {
@@ -265,53 +663,152 @@ function pageHtml(): string {
       if (nickname) localStorage.setItem('nickname', nickname);
     }
 
+    function seatView(data, seatId) {
+      return data.players.find((item) => item.seat === seatId) || { seat: seatId, nickname: '', occupied: false };
+    }
+
+    function renderSeat(data, seatId) {
+      const seat = seatView(data, seatId);
+      const current = data.currentSeat === seatId;
+      const passed = (data.passedSeats || []).includes(seatId);
+      const count = data.handCounts ? data.handCounts[seatId] : 0;
+      const nickname = seat.nickname || '空位';
+      const team = teams[seatId];
+      const el = $('seat' + seatId);
+      el.className = 'seat ' + seatId.toLowerCase() + (current ? ' current' : '') + (passed ? ' passed' : '');
+      el.innerHTML =
+        '<div class="seat-panel"></div>' +
+        '<div class="avatar">' + seatId + '</div>' +
+        '<div class="seat-info">' +
+          '<div class="name">' + escapeHtml(nickname) + '</div>' +
+          '<div class="team-tag ' + (team === 'BLUE' ? 'blue' : 'red') + '">' + team + '</div>' +
+          '<div class="count">' + (passed ? '不要' : (data.started ? count + ' 张牌' : (seat.occupied ? '已入座' : '等待'))) + '</div>' +
+        '</div>';
+    }
+
+    function renderCards(cards, className) {
+      return (cards || []).map((card) =>
+        '<div class="' + className + '"><img src="' + card.image + '" alt="' + escapeHtml(card.label) + '"></div>'
+      ).join('');
+    }
+
+    function renderHand(data) {
+      const levelRank = data.context?.levelRank || '3';
+      $('hand').innerHTML = (data.hand || []).map((card) => {
+        const cls = [
+          'card',
+          state.selected.has(card.id) ? 'selected' : '',
+          card.rank === levelRank ? 'level-card' : ''
+        ].filter(Boolean).join(' ');
+        return '<div class="' + cls + '" data-id="' + card.id + '"><img src="' + card.image + '" alt="' + escapeHtml(card.label) + '"></div>';
+      }).join('');
+      $('selectionLabel').textContent = state.selected.size ? '已选 ' + state.selected.size + ' 张' : '未选牌';
+    }
+
+    function render(data) {
+      state.lastSnapshot = data;
+      const level = data.context?.levelRank || '3';
+      const room = data.code || '--';
+      $('roomLabel').textContent = '房号 ' + room;
+      $('roundLabel').textContent = '第 1 局';
+      $('levelLabel').textContent = '打 ' + level;
+      $('turnLabel').textContent = data.started ? (data.currentSeat === data.yourSeat ? '轮到我*' : '轮到 ' + data.currentSeat) : '等待开局';
+      $('blueLabel').textContent = 'BLUE ' + level;
+      $('redLabel').textContent = 'RED ' + level;
+      $('joinBox').style.opacity = data.started ? '.18' : '1';
+
+      seats.forEach((seat) => renderSeat(data, seat));
+      seats.forEach((seat) => {
+        $('zone' + seat).innerHTML = renderCards((data.tableCards || {})[seat], 'mini-card');
+      });
+
+      if (!data.started) {
+        const joined = data.players.filter((seat) => seat.occupied).length;
+        $('centerText').textContent = joined + '/4 人';
+        $('centerTip').textContent = '房号发给另外 3 台手机，全部加入后开始';
+      } else if (data.result) {
+        $('centerText').textContent = '本局结束';
+        $('centerTip').textContent = '胜方 ' + data.result.winnerTeam;
+      } else if (data.lastPlay) {
+        $('centerText').textContent = seatView(data, data.lastPlay.playerId).nickname + '：' + (data.lastPlay.analysis?.type || '出牌');
+        $('centerTip').textContent = data.currentSeat === data.yourSeat ? '轮到你出牌' : '等待对方出牌';
+      } else {
+        $('centerText').textContent = data.currentSeat === data.yourSeat ? '你先出牌' : '等待 ' + data.currentSeat;
+        $('centerTip').textContent = data.currentSeat === data.yourSeat ? '请选择手牌' : '对方思考中';
+      }
+
+      renderHand(data);
+      $('play').disabled = !data.started || data.currentSeat !== data.yourSeat || state.selected.size === 0;
+      $('pass').disabled = !data.started || data.currentSeat !== data.yourSeat;
+      $('hint').disabled = !data.started || data.currentSeat !== data.yourSeat;
+      $('log').innerHTML = (data.logs || []).slice(0, 1).map(escapeHtml).join('');
+    }
+
     async function refresh() {
       if (!state.roomCode || !state.playerId) return;
       try {
         const data = await api('/api/rooms/' + state.roomCode + '/snapshot?playerId=' + encodeURIComponent(state.playerId));
         render(data);
       } catch (error) {
-        $('status').textContent = error.message;
+        toast(error.message);
       }
     }
 
-    function render(data) {
-      $('status').textContent = '房号 ' + data.code + ' · 你是 ' + (data.yourSeat || '旁观') + (data.started ? ' · 轮到 ' + data.currentSeat : ' · 等待开始');
-      $('seats').innerHTML = data.players.map((seat) =>
-        '<div class="seat ' + (seat.seat === data.currentSeat ? 'current' : '') + '"><b>' + seat.seat + '</b><br>' + (seat.nickname || '空位') + (data.handCounts ? '<br>' + data.handCounts[seat.seat] + ' 张' : '') + '</div>'
-      ).join('');
-      $('hand').innerHTML = (data.hand || []).map((card) =>
-        '<div class="card ' + (state.selected.has(card.id) ? 'selected' : '') + '" data-id="' + card.id + '"><img src="' + card.image + '" alt="' + card.label + '"></div>'
-      ).join('');
-      $('logs').innerHTML = (data.logs || []).map((line) => '<div>' + line + '</div>').join('');
-    }
-
     $('create').onclick = async () => {
-      const nickname = $('nickname').value.trim() || '玩家';
-      const data = await api('/api/rooms', { nickname });
-      remember(data);
-      await refresh();
+      try {
+        const nickname = $('nickname').value.trim() || '玩家';
+        const data = await api('/api/rooms', { nickname });
+        remember(data);
+        toast('房间已创建：' + data.code);
+        await refresh();
+      } catch (error) {
+        toast(error.message);
+      }
     };
     $('join').onclick = async () => {
-      const nickname = $('nickname').value.trim() || '玩家';
-      const code = $('roomCode').value.trim();
-      const data = await api('/api/rooms/' + code + '/join', { nickname, playerId: state.playerId });
-      remember(data);
-      await refresh();
+      try {
+        const nickname = $('nickname').value.trim() || '玩家';
+        const code = $('roomCode').value.trim();
+        const data = await api('/api/rooms/' + code + '/join', { nickname, playerId: state.playerId });
+        remember(data);
+        toast('已加入房间');
+        await refresh();
+      } catch (error) {
+        toast(error.message);
+      }
     };
     $('start').onclick = async () => {
-      await api('/api/rooms/' + state.roomCode + '/start', { playerId: state.playerId });
-      await refresh();
+      try {
+        await api('/api/rooms/' + state.roomCode + '/start', { playerId: state.playerId });
+        await refresh();
+      } catch (error) {
+        toast(error.message);
+      }
     };
     $('play').onclick = async () => {
-      await api('/api/rooms/' + state.roomCode + '/play', { playerId: state.playerId, cardIds: [...state.selected] });
-      state.selected.clear();
-      await refresh();
+      try {
+        await api('/api/rooms/' + state.roomCode + '/play', { playerId: state.playerId, cardIds: Array.from(state.selected) });
+        state.selected.clear();
+        await refresh();
+      } catch (error) {
+        toast(error.message);
+      }
     };
     $('pass').onclick = async () => {
-      await api('/api/rooms/' + state.roomCode + '/pass', { playerId: state.playerId });
+      try {
+        await api('/api/rooms/' + state.roomCode + '/pass', { playerId: state.playerId });
+        state.selected.clear();
+        await refresh();
+      } catch (error) {
+        toast(error.message);
+      }
+    };
+    $('hint').onclick = () => {
+      const cards = state.lastSnapshot?.hand || [];
+      if (!cards.length) return;
       state.selected.clear();
-      await refresh();
+      state.selected.add(cards[0].id);
+      renderHand(state.lastSnapshot);
     };
     $('hand').onclick = (event) => {
       const card = event.target.closest('.card');
@@ -320,8 +817,13 @@ function pageHtml(): string {
       if (state.selected.has(id)) state.selected.delete(id);
       else state.selected.add(id);
       card.classList.toggle('selected');
+      $('selectionLabel').textContent = state.selected.size ? '已选 ' + state.selected.size + ' 张' : '未选牌';
+      if (state.lastSnapshot) {
+        $('play').disabled = !state.lastSnapshot.started || state.lastSnapshot.currentSeat !== state.lastSnapshot.yourSeat || state.selected.size === 0;
+      }
     };
-    setInterval(refresh, 1000);
+
+    setInterval(refresh, 900);
     refresh();
   </script>
 </body>
@@ -342,10 +844,30 @@ function serveHandImage(url: URL, response: http.ServerResponse): boolean {
   return true;
 }
 
+function serveUiImage(url: URL, response: http.ServerResponse): boolean {
+  if (!url.pathname.startsWith('/ui/')) return false;
+  const filename = basename(decodeURIComponent(url.pathname.slice('/ui/'.length)));
+  const candidates = [
+    join('ShouBaYiCocos/assets/resources/ui', filename),
+    join('ShouBaYiCocos/assets/resources', filename),
+    join('ShouBaYiCocos/assets/Texture', filename)
+  ];
+  const file = candidates.find((item) => filename.endsWith('.png') && existsSync(item));
+  if (!file) {
+    json(response, 404, { error: 'NOT_FOUND' });
+    return true;
+  }
+  const data = readFileSync(file);
+  response.writeHead(200, { 'content-type': 'image/png', 'content-length': data.length });
+  response.end(data);
+  return true;
+}
+
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
     if (serveHandImage(url, response)) return;
+    if (serveUiImage(url, response)) return;
 
     if (request.method === 'GET' && url.pathname === '/') {
       const html = pageHtml();
@@ -411,8 +933,11 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === 'POST' && action === 'play') {
       const cardIds = Array.isArray(body.cardIds) ? body.cardIds.filter((id): id is string => typeof id === 'string') : [];
+      const before = online.room.snapshotFor(player.seat);
+      const playedCards = before.hand.filter((card) => cardIds.includes(card.id));
       const result = online.room.playCards(player.seat, cardIds);
       online.version += result.ok ? 1 : 0;
+      if (result.ok) online.tableCards[player.seat] = playedCards;
       online.logs.unshift(`${player.nickname} 出牌：${result.ok ? '成功' : result.reason}`);
       json(response, result.ok ? 200 : 400, { ok: result.ok, reason: result.reason });
       return;
