@@ -1,0 +1,12 @@
+{
+  "envId": "shoubayi-d7g6w8hfc51aea10f",
+  "functionRoot": "./cloudbase/functions",
+  "functions": [
+    {
+      "name": "shoubayi-api",
+      "dir": "shoubayi-api",
+      "runtime": "Nodejs18.15",
+      "timeout": 30
+    }
+  ]
+}

@@ -8,9 +8,13 @@
     "online": "node src/dev/OnlineServer.ts",
     "preview": "node src/dev/PreviewServer.ts",
     "start": "node src/dev/OnlineServer.ts",
+    "build:cloudbase": "node scripts/build-cloudbase.mjs",
     "test": "node --test"
   },
   "engines": {
     "node": ">=24"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
   }
 }
