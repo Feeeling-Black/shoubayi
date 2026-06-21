@@ -214,7 +214,7 @@ function pageHtml(): string {
       height: 100vh;
       height: 100dvh;
       overflow: hidden;
-      background: #123b2a url('/ui/table-bg-v1.png') center / cover no-repeat;
+      background: #123b2a url('/ui/table-bg-v1-mobile.jpg') center / cover no-repeat;
     }
     .stage:after {
       content: "";
@@ -950,7 +950,11 @@ function serveHandImage(url: URL, response: http.ServerResponse): boolean {
     return true;
   }
   const data = readFileSync(file);
-  response.writeHead(200, { 'content-type': 'image/png', 'content-length': data.length });
+  response.writeHead(200, {
+    'content-type': 'image/png',
+    'content-length': data.length,
+    'cache-control': 'public, max-age=31536000, immutable'
+  });
   response.end(data);
   return true;
 }
@@ -963,13 +967,19 @@ function serveUiImage(url: URL, response: http.ServerResponse): boolean {
     join('ShouBaYiCocos/assets/resources', filename),
     join('ShouBaYiCocos/assets/Texture', filename)
   ];
-  const file = candidates.find((item) => filename.endsWith('.png') && existsSync(item));
+  const isImage = /\.(png|jpg|jpeg)$/i.test(filename);
+  const file = candidates.find((item) => isImage && existsSync(item));
   if (!file) {
     json(response, 404, { error: 'NOT_FOUND' });
     return true;
   }
   const data = readFileSync(file);
-  response.writeHead(200, { 'content-type': 'image/png', 'content-length': data.length });
+  const contentType = /\.jpe?g$/i.test(filename) ? 'image/jpeg' : 'image/png';
+  response.writeHead(200, {
+    'content-type': contentType,
+    'content-length': data.length,
+    'cache-control': 'public, max-age=31536000, immutable'
+  });
   response.end(data);
   return true;
 }
